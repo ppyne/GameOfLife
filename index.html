@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Game of Life de Conway</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+    .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    button, input { padding: 6px 10px; }
+    label { display: inline-flex; gap: 6px; align-items: center; }
+    canvas { border: 1px solid #999; image-rendering: pixelated; }
+    .hint { margin-top: 8px; color: #333; font-size: 0.95rem; }
+  </style>
+</head>
+<body>
+  <h1>Game of Life de Conway</h1>
+  <div class="bar">
+    <button id="toggle">Démarrer</button>
+    <button id="step">Pas</button>
+    <button id="clear">Vider</button>
+    <button id="random">Aléatoire</button>
+    <label>
+      Vitesse (ms)
+      <input id="speed" type="number" min="10" step="10" value="60" style="width:90px">
+    </label>
+    <label>
+      Taille cellule
+      <input id="cell" type="number" min="4" max="40" step="1" value="10" style="width:70px">
+    </label>
+  </div>
+
+  <canvas id="c" width="800" height="500"></canvas>
+  <div class="hint">
+    Clic : basculer une cellule. Clic+glisser : dessiner. Espace : start/stop. Entrée : pas.
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d", { alpha: false });
+
+  const btnToggle = document.getElementById("toggle");
+  const btnStep   = document.getElementById("step");
+  const btnClear  = document.getElementById("clear");
+  const btnRandom = document.getElementById("random");
+  const inpSpeed  = document.getElementById("speed");
+  const inpCell   = document.getElementById("cell");
+
+  let cellSize = clampInt(inpCell.value, 4, 40);
+  let cols, rows;
+  let grid, next;
+  let running = false;
+  let timerId = null;
+
+  function clampInt(v, min, max) {
+    v = (v|0);
+    if (v < min) return min;
+    if (v > max) return max;
+    return v;
+  }
+
+  function resizeGrid() {
+    cellSize = clampInt(inpCell.value, 4, 40);
+    cols = Math.floor(canvas.width / cellSize);
+    rows = Math.floor(canvas.height / cellSize);
+
+    grid = new Uint8Array(cols * rows);
+    next = new Uint8Array(cols * rows);
+    draw();
+  }
+
+  function idx(x, y) { return y * cols + x; }
+
+  function draw() {
+    // fond
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // cellules vivantes
+    ctx.fillStyle = "#111111";
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        if (grid[idx(x,y)]) {
+          ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+        }
+      }
+    }
+
+    // grille légère (optionnelle)
+    ctx.strokeStyle = "rgba(0,0,0,0.08)";
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= cols; x++) {
+      const px = x * cellSize + 0.5;
+      ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, rows * cellSize); ctx.stroke();
+    }
+    for (let y = 0; y <= rows; y++) {
+      const py = y * cellSize + 0.5;
+      ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(cols * cellSize, py); ctx.stroke();
+    }
+  }
+
+  function step() {
+    // bords "tore" (wrap-around) : la grille se replie sur elle-même.
+    for (let y = 0; y < rows; y++) {
+      const ym1 = (y - 1 + rows) % rows;
+      const yp1 = (y + 1) % rows;
+
+      for (let x = 0; x < cols; x++) {
+        const xm1 = (x - 1 + cols) % cols;
+        const xp1 = (x + 1) % cols;
+
+        const n =
+          grid[idx(xm1, ym1)] + grid[idx(x, ym1)] + grid[idx(xp1, ym1)] +
+          grid[idx(xm1, y  )]                   + grid[idx(xp1, y  )] +
+          grid[idx(xm1, yp1)] + grid[idx(x, yp1)] + grid[idx(xp1, yp1)];
+
+        const alive = grid[idx(x,y)];
+        // règles Conway
+        next[idx(x,y)] = (alive ? (n === 2 || n === 3) : (n === 3)) ? 1 : 0;
+      }
+    }
+
+    // swap
+    const tmp = grid; grid = next; next = tmp;
+    draw();
+  }
+
+  function setRunning(on) {
+    running = on;
+    btnToggle.textContent = running ? "Arrêter" : "Démarrer";
+    if (timerId) { clearInterval(timerId); timerId = null; }
+    if (running) {
+      const ms = Math.max(10, parseInt(inpSpeed.value, 10) || 60);
+      timerId = setInterval(step, ms);
+    }
+  }
+
+  // UI
+  btnToggle.addEventListener("click", () => setRunning(!running));
+  btnStep.addEventListener("click", () => { if (!running) step(); });
+  btnClear.addEventListener("click", () => { grid.fill(0); draw(); });
+  btnRandom.addEventListener("click", () => {
+    for (let i = 0; i < grid.length; i++) grid[i] = (Math.random() < 0.18) ? 1 : 0;
+    draw();
+  });
+
+  inpSpeed.addEventListener("change", () => { if (running) setRunning(true); });
+  inpCell.addEventListener("change", resizeGrid);
+
+  // dessin à la souris
+  let drawing = false;
+  let drawValue = 1;
+
+  function cellFromEvent(ev) {
+    const r = canvas.getBoundingClientRect();
+    const x = Math.floor((ev.clientX - r.left) / cellSize);
+    const y = Math.floor((ev.clientY - r.top) / cellSize);
+    if (x < 0 || y < 0 || x >= cols || y >= rows) return null;
+    return { x, y };
+  }
+
+  canvas.addEventListener("mousedown", (ev) => {
+    const c = cellFromEvent(ev);
+    if (!c) return;
+    drawing = true;
+    const i = idx(c.x, c.y);
+    drawValue = grid[i] ? 0 : 1;      // toggle au début
+    grid[i] = drawValue;
+    draw();
+  });
+
+  canvas.addEventListener("mousemove", (ev) => {
+    if (!drawing) return;
+    const c = cellFromEvent(ev);
+    if (!c) return;
+    grid[idx(c.x, c.y)] = drawValue;  // paint en continu
+    draw();
+  });
+
+  window.addEventListener("mouseup", () => { drawing = false; });
+
+  // raccourcis clavier
+  window.addEventListener("keydown", (ev) => {
+    if (ev.code === "Space") { ev.preventDefault(); setRunning(!running); }
+    if (ev.code === "Enter") { ev.preventDefault(); if (!running) step(); }
+    if (ev.key.toLowerCase() === "r") { grid.fill(0); for (let i=0;i<grid.length;i++) grid[i]=(Math.random()<0.18)?1:0; draw(); }
+    if (ev.key.toLowerCase() === "c") { grid.fill(0); draw(); }
+  });
+
+  // init
+  resizeGrid();
+
+  // Seed: glider (pour démarrer avec quelque chose)
+  function putGlider(x, y) {
+    const pts = [[1,0],[2,1],[0,2],[1,2],[2,2]];
+    for (const [dx,dy] of pts) {
+      const xx = (x+dx+cols)%cols, yy = (y+dy+rows)%rows;
+      grid[idx(xx,yy)] = 1;
+    }
+  }
+  putGlider(2, 2);
+  draw();
+})();
+</script>
+</body>
+</html>
