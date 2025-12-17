@@ -1,4 +1,4 @@
-# Conways's Game of Live
+# Conway’s Game of Life
 
 A simple, self-contained implementation of **Conway’s Game of Life** written in plain JavaScript, with no dependencies, in a single HTML file.
 
